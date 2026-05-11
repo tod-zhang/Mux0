@@ -21,6 +21,7 @@ final class WorkspaceListView: NSView {
     /// AppKit row bubbles the edit request up (workspaceId + currentCommand);
     /// SwiftUI shell presents the alert and writes back via WorkspaceStore on save.
     var onRequestEditCommand: ((UUID, String) -> Void)?
+    var onRequestNewWorkspace: (() -> Void)?
 
     private let scrollView = NSScrollView()
     private let rowsContainer = FlippedRowsContainer()
@@ -103,6 +104,27 @@ final class WorkspaceListView: NSView {
         super.layout()
         scrollView.frame = bounds
         layoutRows(animated: false)
+    }
+
+    /// Right-click on the empty area below the last row (or on an empty
+    /// sidebar at startup) pops a context menu offering "New Workspace".
+    /// Clicks that land on a workspace row are consumed by the row's own
+    /// `rightMouseDown` (rename/edit/delete menu), so this only fires on the
+    /// rowsContainer / scrollView background.
+    override func rightMouseDown(with event: NSEvent) {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        let item = NSMenuItem(
+            title: L10n.string("sidebar.newWorkspace"),
+            action: #selector(beginCreateWorkspaceAction),
+            keyEquivalent: "")
+        item.target = self
+        menu.addItem(item)
+        NSMenu.popUpContextMenu(menu, with: event, for: self)
+    }
+
+    @objc private func beginCreateWorkspaceAction() {
+        onRequestNewWorkspace?()
     }
 
     func update(workspaces: [Workspace],
@@ -713,6 +735,35 @@ private final class WorkspaceRowItemView: NSView, NSTextFieldDelegate, NSDraggin
         onDragEnded?()
     }
 
+    /// Compose the branch / diff-stats line for a row. Returns an attributed
+    /// string with three runs: `⎇ <branch>` in tertiary text, optional
+    /// `  +N` in success colour, optional `  -N` in danger colour. The
+    /// extra leading space before each number provides natural separation
+    /// without forcing trailing whitespace on the branch token.
+    static func branchAttributedString(branch: String,
+                                       added: Int?,
+                                       deleted: Int?,
+                                       theme: AppTheme) -> NSAttributedString {
+        let s = NSMutableAttributedString()
+        s.append(NSAttributedString(string: "⎇ \(branch)", attributes: [
+            .font: DT.Font.mono,
+            .foregroundColor: theme.textTertiary,
+        ]))
+        if let added, added > 0 {
+            s.append(NSAttributedString(string: "  +\(added)", attributes: [
+                .font: DT.Font.mono,
+                .foregroundColor: theme.success,
+            ]))
+        }
+        if let deleted, deleted > 0 {
+            s.append(NSAttributedString(string: "  -\(deleted)", attributes: [
+                .font: DT.Font.mono,
+                .foregroundColor: theme.danger,
+            ]))
+        }
+        return s
+    }
+
     private func updateContent() {
         titleLabel.stringValue = workspace.name
         let hasCommand = (workspace.defaultCommand?.isEmpty == false)
@@ -724,10 +775,19 @@ private final class WorkspaceRowItemView: NSView, NSTextFieldDelegate, NSDraggin
             commandLabel.isHidden = true
         }
         // 单一次标题位：有 default command 就让位给它，否则显示 branch
+        // (+ git diff stats vs HEAD when the working tree differs from the
+        // last commit). The stats portion uses theme.success / .danger so
+        // the row carries the VS Code "is anything uncommitted" cue.
         if !hasCommand, let branch = metadata.gitBranch {
-            branchLabel.stringValue = "⎇ \(branch)"
+            branchLabel.attributedStringValue = Self.branchAttributedString(
+                branch: branch,
+                added: metadata.gitDiffAdded,
+                deleted: metadata.gitDiffDeleted,
+                theme: theme
+            )
             branchLabel.isHidden = false
         } else {
+            branchLabel.attributedStringValue = NSAttributedString()
             branchLabel.stringValue = ""
             branchLabel.isHidden = true
         }
@@ -754,7 +814,11 @@ private final class WorkspaceRowItemView: NSView, NSTextFieldDelegate, NSDraggin
             titleLabel.textColor = theme.textSecondary
             titleLabel.font = DT.Font.body
         }
-        branchLabel.textColor = theme.textTertiary
+        // branchLabel uses attributed runs (theme.textTertiary for the
+        // "⎇ branch" portion, theme.success / .danger for +N / -N) so
+        // assigning .textColor here would override them with a single
+        // colour. We rebuild the attributed string in updateContent
+        // whenever the branch / diff metadata changes.
         commandLabel.textColor = theme.textTertiary
         prBadge.textColor = theme.textTertiary
         renameField.textColor = theme.textPrimary

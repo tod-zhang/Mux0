@@ -11,7 +11,7 @@ struct AgentsSectionView: View {
     private static let managedKeys: [String] = {
         let status = HookMessage.Agent.allCases.map(\.settingsKey)
         let resume = HookMessage.Agent.allCases.filter(\.supportsResume).map(\.resumeSettingsKey)
-        return status + resume
+        return status + resume + ["mux0-notifications-enabled"]
     }()
 
     /// Codex hooks are gated behind an experimental flag (`[features].codex_hooks = true`
@@ -36,6 +36,16 @@ struct AgentsSectionView: View {
                 Text(L10n.Settings.Agents.notificationsTitle)
             } footer: {
                 Text(L10n.Settings.Agents.notificationsFooter)
+                    .font(Font(DT.Font.small))
+                    .foregroundColor(Color(theme.textTertiary))
+            }
+
+            Section {
+                MacNotificationsToggleRow(theme: theme, settings: settings)
+            } header: {
+                Text(L10n.Settings.Agents.macNotificationsTitle)
+            } footer: {
+                Text(L10n.Settings.Agents.macNotificationsFooter)
                     .font(Font(DT.Font.small))
                     .foregroundColor(Color(theme.textTertiary))
             }
@@ -159,6 +169,39 @@ private struct AgentResumeToggleRow: View {
             set: { newValue in
                 settings.set(agent.resumeSettingsKey, newValue ? "true" : nil)
                 if !newValue { workspaceStore.clearResumePrefills(forAgent: agent) }
+            }
+        )
+    }
+}
+
+/// macOS notification master toggle. Default = ON (key absent or any
+/// non-"false" value); only a stored "false" disables. Putting the off-state
+/// in storage (rather than the on-state) keeps the on-disk config clean for
+/// the common path — users who never visit Settings have no key at all.
+private struct MacNotificationsToggleRow: View {
+    let theme: AppTheme
+    let settings: SettingsConfigStore
+
+    var body: some View {
+        LabeledContent {
+            Toggle("", isOn: binding)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        } label: {
+            Text(L10n.Settings.Agents.macNotificationsLabel)
+        }
+    }
+
+    private var binding: Binding<Bool> {
+        Binding(
+            get: {
+                let raw = settings.get("mux0-notifications-enabled")?.lowercased()
+                return raw != "false"
+            },
+            set: { newValue in
+                // Persist only the off-state so the default ON path leaves
+                // the config file untouched.
+                settings.set("mux0-notifications-enabled", newValue ? nil : "false")
             }
         )
     }

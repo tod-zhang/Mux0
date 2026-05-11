@@ -27,7 +27,8 @@ final class SidebarListBridgeTests: XCTestCase {
             metadataTick: tick,
             languageTick: 0,
             onRequestDelete: { _ in },
-            onRequestEditCommand: { _, _ in }
+            onRequestEditCommand: { _, _ in },
+            onRequestNewWorkspace: { }
         )
         let host = NSHostingView(rootView: AnyView(bridge))
         host.frame = NSRect(x: 0, y: 0, width: 200, height: 400)

@@ -7,9 +7,9 @@ struct ContentView: View {
     @State private var pwdStore = TerminalPwdStore()
     @State private var settingsStore: SettingsConfigStore
     @State private var quickActionsStore: QuickActionsStore
-    @State private var sidebarCollapsed: Bool = false
     @State private var showSettings: Bool = false
     @State private var hookListener: HookSocketListener?
+    @State private var notificationManager = NotificationManager()
     @State private var updateStore = UpdateStore(
         currentVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     )
@@ -28,11 +28,6 @@ struct ContentView: View {
     private let trafficLightInset: CGFloat = 28
     private let cardInset: CGFloat = 8
     private let cardRadius: CGFloat = DT.Radius.card
-    /// 顶部一对按钮（toggle 在左、"+"" 在右）容器 leading：
-    /// 让"+"按钮中心仍与 sidebar row 状态图标列对齐 = sidebarWidth - 25；
-    /// 容器起点 = (sidebarWidth - 25) - 11 - (按钮宽 22 + xs 间距 4) = sidebarWidth - 62。
-    /// 这样 toggle 相对原位置向左挪了一格，"+"接管原 toggle 的图标列轴线。
-    private let headerControlsLeading: CGFloat = DT.Layout.sidebarWidth - 25 - 11 - (22 + DT.Space.xs)
 
     /// Master UI gate for the sidebar + tab bar status icons. True iff the user
     /// has enabled at least one agent in Settings → Agents; false collapses the
@@ -58,19 +53,17 @@ struct ContentView: View {
         let contentBg = themeManager.contentEffectiveOpacity
         return ZStack(alignment: .topLeading) {
             HStack(spacing: 0) {
-                if !sidebarCollapsed {
-                    SidebarView(
-                        store: store,
-                        statusStore: statusStore,
-                        pwdStore: pwdStore,
-                        theme: themeManager.theme,
-                        backgroundOpacity: bgOpacity,
-                        showStatusIndicators: showStatusIndicators,
-                        updateStore: updateStore
-                    )
-                    .padding(.top, trafficLightInset)
-                    .transition(.move(edge: .leading).combined(with: .opacity))
-                }
+                SidebarView(
+                    store: store,
+                    statusStore: statusStore,
+                    pwdStore: pwdStore,
+                    quickActionsStore: quickActionsStore,
+                    theme: themeManager.theme,
+                    backgroundOpacity: bgOpacity,
+                    showStatusIndicators: showStatusIndicators,
+                    updateStore: updateStore
+                )
+                .padding(.top, trafficLightInset)
 
                 ZStack {
                     // TabBridge 常驻挂载：进入设置只是把它 z-order 压到底层并关交互，
@@ -122,24 +115,9 @@ struct ContentView: View {
                     y: 2
                 )
                 .padding(.top, trafficLightInset)
-                .padding(.leading, sidebarCollapsed ? cardInset : 0)
                 .padding(.trailing, cardInset)
                 .padding(.bottom, cardInset)
             }
-
-            HStack(spacing: DT.Space.xs) {
-                sidebarToggleButton
-                if !sidebarCollapsed {
-                    addWorkspaceButton
-                }
-            }
-            .padding(.leading, headerControlsLeading)
-            .padding(.top, DT.Space.xs)
-
-            quickActionsBar
-                .frame(maxWidth: .infinity, alignment: .topTrailing)
-                .padding(.trailing, cardInset + DT.Space.xs)
-                .padding(.top, DT.Space.xs)
         }
         .frame(minWidth: 960, minHeight: 620)
         // 根背景用 sidebar 色作为窗口底色 —— sidebar 区不再额外叠一层，整个
@@ -172,6 +150,7 @@ struct ContentView: View {
                 pwdStoreRef.setPwd(pwd, for: terminalId)
             }
             applyUnfocusedOpacityFromSettings()
+            applyRightClickPasteFromSettings()
             // applyWindowEffectsFromSettings must run BEFORE reloadConfig so the
             // effective background-opacity it installs on GhosttyBridge is picked
             // up by the next buildConfig.
@@ -185,7 +164,14 @@ struct ContentView: View {
                 GhosttyBridge.shared.reloadConfig()
                 themeManager.refresh()
                 applyUnfocusedOpacityFromSettings()
+                applyRightClickPasteFromSettings()
             }
+            // Wire the audio-cue bridge before starting the hook listener so
+            // the first inbound event already has a destination. Banners were
+            // removed at the user's request — agent events just play the
+            // system alert sound; the in-app status icons carry the visual
+            // signal.
+            configureNotificationManager()
             if hookListener == nil {
                 let path = HookSocketListener.defaultPath
                 do {
@@ -193,11 +179,19 @@ struct ContentView: View {
                     let store = self.statusStore
                     let settingsStoreRef = self.settingsStore
                     let workspaceStoreRef = self.store
+                    let notifier = self.notificationManager
                     listener.onMessage = { msg in
                         HookDispatcher.dispatch(msg,
                                                 settings: settingsStoreRef,
                                                 store: store,
-                                                workspaceStore: workspaceStoreRef)
+                                                workspaceStore: workspaceStoreRef) { event in
+                            switch event {
+                            case .needsInput:
+                                notifier.postNeedsInput()
+                            case .finished:
+                                notifier.postFinished()
+                            }
+                        }
                     }
                     try listener.start()
                     hookListener = listener
@@ -205,17 +199,27 @@ struct ContentView: View {
                     print("[mux0] Failed to start hook socket listener: \(error)")
                 }
             }
-            // Auto-update: wire SparkleBridge and schedule the silent launch check.
-            // SparkleBridge.startUpdater is internally idempotent, but the 3 s delayed
-            // Task is not — guard the schedule so a re-entry into .onAppear doesn't
-            // stack multiple in-flight silent checks.
-            SparkleBridge.shared.store = updateStore
-            SparkleBridge.shared.start()
+            // Auto-update (no Sparkle): once-per-launch GitHub releases probe,
+            // gated to ~24h. On a real version bump, ReleaseChecker fires a
+            // macOS notification whose click opens the fork's Releases page.
+            // The guard around `didScheduleLaunchUpdateCheck` keeps re-entry
+            // into .onAppear from stacking multiple in-flight fetches.
             if !didScheduleLaunchUpdateCheck {
                 didScheduleLaunchUpdateCheck = true
+                // UpdateStore is @MainActor + @Observable, captured by
+                // value-ish reference. Closures keep the strong reference;
+                // ContentView outlives the app session anyway.
+                let updateStoreRef = updateStore
+                let notifierRef = notificationManager
+                ReleaseChecker.shared.onUpdateAvailable = { version in
+                    updateStoreRef.latestAvailableVersion = version
+                    notifierRef.postReleaseAvailable()
+                }
                 Task { @MainActor in
+                    // Brief delay so the launch sequence finishes mounting
+                    // surfaces before we kick off a network fetch.
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
-                    SparkleBridge.shared.checkForUpdates(silently: true)
+                    await ReleaseChecker.shared.checkIfDue(currentVersion: updateStoreRef.currentVersion)
                 }
             }
         }
@@ -255,6 +259,19 @@ struct ContentView: View {
         }
     }
 
+    /// Wire `NotificationManager` once: the master toggle reads from settings
+    /// on every event so flipping the Agents toggle takes effect immediately.
+    /// No click handler — sound-only alerts have nothing to click.
+    private func configureNotificationManager() {
+        notificationManager.start()
+        let settingsRef = settingsStore
+        notificationManager.isEnabled = {
+            // Default ON. Only an explicit "false" disables.
+            let raw = settingsRef.get("mux0-notifications-enabled")?.lowercased()
+            return raw != "false"
+        }
+    }
+
     /// Read `unfocused-split-opacity` from the mux0 override config (default 0.7) and
     /// push it into GhosttyTerminalView so non-focused panes dim correctly.
     /// Called on appear and whenever settings change.
@@ -262,6 +279,14 @@ struct ContentView: View {
         let raw = settingsStore.get("unfocused-split-opacity")
         let value = raw.flatMap { Double($0) } ?? 0.7
         GhosttyTerminalView.setUnfocusedOpacity(CGFloat(value))
+    }
+
+    /// Read `mux0-right-click-paste` from settings (default ON) and push it
+    /// into GhosttyTerminalView. The default-ON path means an absent key
+    /// behaves like enabled — only an explicit "false" turns it off.
+    private func applyRightClickPasteFromSettings() {
+        let raw = settingsStore.get("mux0-right-click-paste")?.lowercased()
+        GhosttyTerminalView.setRightClickPaste(raw != "false")
     }
 
     /// Read `background-opacity` and `background-blur-radius` from the mux0 override
@@ -282,68 +307,6 @@ struct ContentView: View {
         themeManager.applyWindowEffects(opacity: opacity, blurRadius: blur, contentOpacity: content, contentShadow: shadow)
     }
 
-    private var sidebarToggleButton: some View {
-        IconButton(
-            theme: themeManager.theme,
-            help: String(localized: (sidebarCollapsed ? L10n.Sidebar.showSidebar : L10n.Sidebar.hideSidebar).withLocale(locale))
-        ) {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                sidebarCollapsed.toggle()
-            }
-        } label: {
-            Image(systemName: "sidebar.left")
-                .font(.system(size: 13, weight: .regular))
-                .foregroundColor(Color(themeManager.theme.textSecondary))
-        }
-    }
-
-    /// 顶部"+"按钮：触发 SidebarView 监听的 mux0BeginCreateWorkspace 通知，
-    /// 由 sidebar 内部计算默认名称并继承当前 pwd。仅在 sidebar 展开时显示——
-    /// 收起时 SidebarView 不在视图树里，没人响应该通知。
-    private var addWorkspaceButton: some View {
-        IconButton(
-            theme: themeManager.theme,
-            help: String(localized: L10n.Sidebar.newWorkspace.withLocale(locale))
-        ) {
-            NotificationCenter.default.post(name: .mux0BeginCreateWorkspace, object: nil)
-        } label: {
-            Image(systemName: "plus")
-                .font(.system(size: 13, weight: .regular))
-                .foregroundColor(Color(themeManager.theme.textSecondary))
-        }
-    }
-
-    @ViewBuilder
-    private var quickActionsBar: some View {
-        let displayList = quickActionsStore.displayList
-        if !displayList.isEmpty {
-            HStack(spacing: DT.Space.xs) {
-                ForEach(displayList, id: \.self) { id in
-                    quickActionButton(id: id)
-                }
-            }
-        }
-    }
-
-    private func quickActionButton(id: QuickActionId) -> some View {
-        let tooltip = quickActionsStore.displayName(for: id, locale: locale)
-        let icon = quickActionsStore.iconSource(for: id)
-        return IconButton(theme: themeManager.theme, help: tooltip) {
-            guard let wsId = store.selectedId,
-                  let result = store.addQuickActionTab(id: id, title: tooltip, in: wsId)
-            else { return }
-            if let prev = result.sourcePwdTerminalId {
-                pwdStore.inherit(from: prev, to: result.terminalId)
-            }
-        } label: {
-            QuickActionIconView(
-                source: icon,
-                size: 13,
-                color: Color(themeManager.theme.textSecondary)
-            )
-        }
-        .disabled(store.selectedId == nil)
-    }
 }
 
 // MARK: - Notification names

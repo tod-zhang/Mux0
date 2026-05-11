@@ -11,9 +11,10 @@ final class WorkspaceStore {
     init(persistenceKey: String = "mux0.workspaces.v2") {
         self.persistenceKey = persistenceKey
         load()
-        if workspaces.isEmpty && persistenceKey == "mux0.workspaces.v2" {
-            createWorkspace(name: "Default")
-        }
+        // Empty sidebar on first launch is intentional — the user creates a
+        // workspace by hitting "+" and picking a folder. Auto-seeding a
+        // "Default" row would add a useless entry that doesn't reflect any of
+        // their projects.
         if selectedId == nil { selectedId = workspaces.first?.id }
     }
 
@@ -24,9 +25,11 @@ final class WorkspaceStore {
     // MARK: - Workspace CRUD
 
     @discardableResult
-    func createWorkspace(name: String) -> UUID {
-        var ws = Workspace(name: name)
-        let tab = makeNewTab(index: 1)
+    func createWorkspace(name: String, defaultCommand: String? = nil,
+                         quickActionId: String? = nil) -> UUID {
+        var ws = Workspace(name: name, defaultCommand: defaultCommand)
+        var tab = makeNewTab(index: 1)
+        tab.quickActionId = quickActionId
         ws.tabs.append(tab)
         ws.selectedTabId = tab.id
         workspaces.append(ws)

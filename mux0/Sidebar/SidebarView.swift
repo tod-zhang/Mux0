@@ -14,6 +14,7 @@ struct SidebarView: View {
     @Bindable var store: WorkspaceStore
     @Bindable var statusStore: TerminalStatusStore
     @Bindable var pwdStore: TerminalPwdStore
+    @Bindable var quickActionsStore: QuickActionsStore
     var theme: AppTheme
     /// ghostty `background-opacity`。乘到 sidebar 底色上 —— 当 < 1 且 NSWindow
     /// 已经是透明时，桌面/下层应用才透得过来。
@@ -54,13 +55,13 @@ struct SidebarView: View {
                 onRequestEditCommand: { id, current in
                     commandDraft = current
                     workspaceForCommandEdit = id
-                }
+                },
+                onRequestNewWorkspace: { createWorkspaceWithDefaultName() }
             )
             // 顶部留出与 traffic light 区的呼吸：原 header 撤掉后，第一行
             // workspace 直接贴到 28pt traffic light inset 下沿会显得局促；
             // lg(16) 让 workspace 列表距 trafficLightInset 下沿有足够喘息。
             .padding(.top, DT.Space.lg)
-            footer
         }
         .frame(width: DT.Layout.sidebarWidth)
         // Sidebar 区有意不再自画背景 —— 依赖 ContentView 的根 `.background(sidebar)`
@@ -68,9 +69,6 @@ struct SidebarView: View {
         // 根层 alpha，颜色浓度完全一致，中间不出现「双层叠加形成的分格」。
         .onAppear { startRefreshers() }
         .onChange(of: store.workspaces) { _, _ in startRefreshers() }
-        .onReceive(NotificationCenter.default.publisher(for: .mux0BeginCreateWorkspace)) { _ in
-            createWorkspaceWithDefaultName()
-        }
         .alert(String(localized: (L10n.Sidebar.deleteAlertTitle).withLocale(locale)),
                isPresented: Binding(
                    get: { workspaceToDelete != nil },
@@ -108,81 +106,58 @@ struct SidebarView: View {
         }
     }
 
-    // MARK: - Footer
-
-    private var footer: some View {
-        HStack(spacing: DT.Space.xs) {
-            brandVersionButton
-            if updateStore.hasUpdate {
-                Image(systemName: "circle.fill")
-                    .font(.system(size: 6))
-                    .foregroundColor(Color(theme.danger))
-                    .symbolEffect(.pulse)
-                    .help(String(localized: (L10n.Sidebar.updateAvailable).withLocale(locale)))
-            }
-            Spacer()
-            IconButton(theme: theme, help: String(localized: (L10n.Sidebar.settingsTooltip).withLocale(locale))) {
-                NotificationCenter.default.post(name: .mux0OpenSettings, object: nil)
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundColor(Color(theme.textSecondary))
-            }
-        }
-        .padding(.leading, DT.Space.sm + DT.Space.md)
-        .padding(.trailing, Self.iconColumnButtonTrailing)
-        .padding(.vertical, DT.Space.sm)
-    }
-
-    /// 让 header "+" / footer 齿轮 / ContentView 的 sidebar toggle 按钮中心
-    /// 与 sidebar row 状态图标列对齐。图标中心距 sidebar 右 =
-    /// outerHorizontalInset(8) + hPad(12) + iconSize/2(5) = 25；22pt 按钮右边距 = 25 - 11 = 14。
-    fileprivate static let iconColumnButtonTrailing: CGFloat = 14
-
-    /// "Mux0 v0.0.0" 合体按钮：整块都可点击，行为等同原 versionButton（跳转
-    /// Settings → Update）。hover 时光标切到 pointing hand，与其他可点击图标
-    /// 一致。`.contentShape(Rectangle())` 让两段 Text 之间的空白也吃 hit test。
-    private var brandVersionButton: some View {
-        Button {
-            NotificationCenter.default.post(
-                name: .mux0OpenSettings,
-                object: nil,
-                userInfo: ["section": "update"]
-            )
-        } label: {
-            HStack(spacing: DT.Space.xs) {
-                Text(L10n.Sidebar.title)
-                    .font(Font(DT.Font.smallB))
-                    .foregroundColor(Color(theme.textPrimary))
-                Text("v\(updateStore.currentVersion)")
-                    .font(Font(DT.Font.small))
-                    .foregroundColor(Color(theme.textSecondary))
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(String(localized: (L10n.Sidebar.checkForUpdates).withLocale(locale)))
-        .onHover { inside in
-            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
-    }
-
     // MARK: - Create
 
     func createWorkspaceWithDefaultName() {
-        // Read sourceId BEFORE createWorkspace. The one case where ordering
-        // matters is fresh install (selectedId == nil): createWorkspace auto-
-        // selects the new workspace, after which selectedWorkspace.selectedTab
-        // would resolve to the brand-new terminal, whose UUID has no pwdStore
-        // entry yet — so inherit would be a silent no-op. Pre-reading also
-        // documents the intent: we want the pane the user was looking at when
-        // they clicked +, not whatever the selection state becomes afterwards.
-        let sourceId = store.selectedWorkspace?.selectedTab?.focusedTerminalId
-        let name = "workspace \(store.workspaces.count + 1)"
-        let newTerminalId = store.createWorkspace(name: name)
-        if let sourceId {
-            pwdStore.inherit(from: sourceId, to: newTerminalId)
+        // Open a folder picker first; the new workspace will auto-cd into the
+        // chosen folder and adopt the folder name. Cancel = no workspace
+        // created. The picker is attached as a sheet to the host window so it
+        // tracks app focus and tells macOS to grant TCC access in-context.
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = String(localized: L10n.Sidebar.folderPickerPrompt.withLocale(locale))
+        panel.message = String(localized: L10n.Sidebar.folderPickerMessage.withLocale(locale))
+        // Pre-seed at the currently focused terminal's cwd so the picker opens
+        // somewhere meaningful instead of "Recents". Fallback: home dir.
+        if let focused = store.selectedWorkspace?.selectedTab?.focusedTerminalId,
+           let cwd = pwdStore.pwd(for: focused),
+           !cwd.isEmpty {
+            panel.directoryURL = URL(fileURLWithPath: cwd, isDirectory: true)
         }
+        let host = NSApp.keyWindow ?? NSApp.windows.first { $0.isVisible }
+        let handler: (NSApplication.ModalResponse) -> Void = { [self] response in
+            guard response == .OK, let url = panel.url else { return }
+            createWorkspace(forFolder: url)
+        }
+        if let host {
+            panel.beginSheetModal(for: host, completionHandler: handler)
+        } else {
+            // No window yet (rare — sidebar visible means there's a window,
+            // but kept defensively): fall back to a free-floating panel.
+            panel.begin(completionHandler: handler)
+        }
+    }
+
+    private func createWorkspace(forFolder url: URL) {
+        let folderName = url.lastPathComponent
+        // basename can be empty for "/" — fall back to numeric default so the
+        // workspace row never renders blank.
+        let name = folderName.isEmpty
+            ? "workspace \(store.workspaces.count + 1)"
+            : folderName
+        // The first tab adopts whichever Quick Action sits at the top of the
+        // user's enabled list (Claude Code by default). nil → plain terminal
+        // tab. We do NOT inject `cd '/path'` as defaultCommand — ghostty's
+        // `working_directory` (seeded from pwdStore below) starts the shell
+        // in the right folder, so the cd would only be a redundant echo.
+        let quickActionId = quickActionsStore.displayList.first
+        let newTerminalId = store.createWorkspace(name: name, quickActionId: quickActionId)
+        // Seed pwd immediately so (a) ghostty starts the shell in the chosen
+        // folder via working_directory, and (b) the sidebar's metadata
+        // refresher's first git poll (5 s tick) hits the right path.
+        pwdStore.setPwd(url.path, for: newTerminalId)
     }
 
     // MARK: - Refreshers

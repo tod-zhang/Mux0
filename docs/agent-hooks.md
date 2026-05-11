@@ -113,6 +113,21 @@ Codex wrapper **不**写 overlay 版的 `config.toml`：overlay 里的 `config.t
 
 **历史**：早期版本把用户 `config.toml` 拷贝到 overlay 并在前面 prepend `notify = [...]`，结果会写 config 的子命令把改动写进 overlay，进程退出 `rm -rf` 后丢失（无回写）。现在用 symlink + cleanup 回写 + `-c` 覆盖避免了这个 bug，也不再担心 TOML section 边界（早期方案为了避免被用户末尾的 `[notice.model_migrations]` 吞掉必须前置）。
 
+## macOS 系统通知
+
+`HookDispatcher.dispatch` 在两个真实状态转换点向可选的 `notify` 闭包派事件，由 `Notifications/NotificationManager.swift` 转成 `UNUserNotificationCenter` 横幅：
+
+- `needsInput`：仅在状态从 `.running` 翻进 `.needsInput` 时 fire（前述心跳过滤后），用于"Claude 等权限"
+- `finished`：success 或 failed 都 fire；body 优先用 `HookMessage.summary`（Stop hook 截取的 transcript 尾段），否则回落到"Task finished · 12s"这类时长文本
+
+**抑制规则**：mux0 处于 `NSApp.isActive == true` 且事件归属的终端 id 在当前可见 tab 的 split 树里 → 不发。其他情况（mux0 在后台、用户在别的 tab、用户在别的 workspace）都会发。
+
+**点击行为**：notification userInfo 里塞了 `mux0.terminalId`，delegate 反查 `WorkspaceStore` 定位 (workspace, tab) → `NSApp.activate` + `select(id:)` + `selectTab(id:in:)`。
+
+**总开关**：`mux0-notifications-enabled`（config 默认 ON，只在用户显式关闭时写 `false`）。每个 agent 的 `mux0-agent-status-<rawValue>` 仍是上游门控——agent 未启用时 `HookDispatcher.dispatch` 提前 return，notify 闭包不会被调用。
+
+**授权**：`UNUserNotificationCenter.requestAuthorization` 延迟到首次 post 时才请求，从不打扰从未跑 agent 的用户。
+
 ## Historical: shell 状态来源
 
 shell preexec/precmd 在 2026-04 之前是第 4 种状态源。现已从 pipeline 中移除：

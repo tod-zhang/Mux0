@@ -58,6 +58,8 @@ mux0/
 ├── Metadata/
 │   ├── WorkspaceMetadata.swift  — git/PR/通知 数据结构
 │   └── MetadataRefresher.swift  — 5s 轮询 + OSC 通知处理 + onRefresh 回调
+├── Notifications/
+│   └── NotificationManager.swift  — 声音提示桥（needsInput/finished/release-available → NSSound.beep()，无横幅无点击路由）
 ├── Models/
 │   ├── Workspace.swift            — Workspace / TerminalTab / SplitNode / SplitDirection（Codable）
 │   ├── WorkspaceStore.swift       — @Observable，workspace / tab / split CRUD + UserDefaults 持久化
@@ -84,6 +86,7 @@ mux0/
 ├── Update/
 │   ├── UpdateState.swift         — 自动更新 UI 状态枚举（idle / checking / upToDate / updateAvailable / downloading / readyToInstall / error）
 │   ├── UpdateStore.swift         — @Observable，自动更新状态存储（sidebar 红点 + Settings Update section 都读这个）
+│   ├── ReleaseChecker.swift      — 24h throttled GitHub Releases 轮询，发现新版本时设 UpdateStore.latestAvailableVersion + 播放系统提示音
 │   ├── SparkleBridge.swift       — 单例，持有 SPUUpdater，对外暴露 checkForUpdates/downloadAndInstall/skip/dismiss/retry；Debug 下为空 stub
 │   └── UpdateUserDriver.swift    — 实现 Sparkle 的 SPUUserDriver，事件 → UpdateStore 变更（MainActor，Release-only）
 └── Theme/
@@ -137,6 +140,7 @@ mux0/
 | 同步 landing 版本号 | `./scripts/sync-landing-version.sh`（`--check` 为只读校验，CI drift check 会调用） |
 | 新增设置项 | `Settings/Sections/<对应>.swift`, `Settings/SettingsConfigStore.swift`（默认值/校验）, `docs/settings-reference.md` |
 | 新增终端状态来源 | `Models/HookMessage.swift` → `Models/HookSocketListener.swift` → `Models/TerminalStatusStore.swift`，展示在 `Theme/TerminalStatusIconView.swift` |
+| 改通知声音 / 触发规则 | `Notifications/NotificationManager.swift`（NSSound.beep），`Models/HookDispatcher.swift`（哪些事件 fire），`ContentView.configureNotificationManager`（接线 isEnabled），`Settings/Sections/AgentsSectionView.swift`（开关） |
 | 侧边栏 / Tab 的 rename / delete / reorder 交互 | `Sidebar/SidebarView.swift`, `Sidebar/WorkspaceListView.swift`, `Bridge/SidebarListBridge.swift`, `TabContent/TabBarView.swift`, `TabContent/TabContentView.swift`, `Models/WorkspaceStore.swift` |
 | 跑测试 | `xcodebuild test -project mux0.xcodeproj -scheme mux0Tests` |
 | 重新生成 Xcode 工程 | `xcodegen generate`（修改 `project.yml` 后执行）|

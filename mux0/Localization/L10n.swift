@@ -66,6 +66,9 @@ enum L10n {
         static let commandAlertPlaceholder = LocalizedStringResource("sidebar.row.commandPanel.placeholder")
         static let showSidebar          = LocalizedStringResource("sidebar.show")
         static let hideSidebar          = LocalizedStringResource("sidebar.hide")
+        // NSOpenPanel chrome for "new workspace = choose folder" flow.
+        static let folderPickerPrompt   = LocalizedStringResource("sidebar.folderPicker.prompt")
+        static let folderPickerMessage  = LocalizedStringResource("sidebar.folderPicker.message")
         // Footer auto-update affordances (version pill + pulsing red dot).
         static let updateAvailable      = LocalizedStringResource("sidebar.updateAvailable")
         static let checkForUpdates      = LocalizedStringResource("sidebar.checkForUpdates")
@@ -157,6 +160,7 @@ enum L10n {
             static let copyOnSelect           = LocalizedStringResource("settings.terminal.copyOnSelect")
             static let hideMouseWhileTyping   = LocalizedStringResource("settings.terminal.hideMouseWhileTyping")
             static let confirmClose           = LocalizedStringResource("settings.terminal.confirmClose")
+            static let rightClickPaste        = LocalizedStringResource("settings.terminal.rightClickPaste")
         }
         enum QuickActions {
             static let customNamePlaceholder    = LocalizedStringResource("settings.quickActions.customNamePlaceholder")
@@ -182,6 +186,9 @@ enum L10n {
             static let codexAlertOK        = LocalizedStringResource("settings.agents.codexAlertOK")
             static let notificationsTitle  = LocalizedStringResource("settings.agents.notificationsTitle")
             static let notificationsFooter = LocalizedStringResource("settings.agents.notificationsFooter")
+            static let macNotificationsTitle  = LocalizedStringResource("settings.agents.macNotificationsTitle")
+            static let macNotificationsLabel  = LocalizedStringResource("settings.agents.macNotificationsLabel")
+            static let macNotificationsFooter = LocalizedStringResource("settings.agents.macNotificationsFooter")
             static let resumeTitle         = LocalizedStringResource("settings.agents.resumeTitle")
             static let resumeFooter        = LocalizedStringResource("settings.agents.resumeFooter")
         }

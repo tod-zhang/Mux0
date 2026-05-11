@@ -9,6 +9,7 @@ struct TerminalSectionView: View {
         "copy-on-select",
         "mouse-hide-while-typing",
         "confirm-close-surface",
+        "mux0-right-click-paste",
     ]
 
     var body: some View {
@@ -35,10 +36,20 @@ struct TerminalSectionView: View {
                 label: L10n.Settings.Terminal.hideMouseWhileTyping
             )
 
+            BoundToggle(
+                settings: settings,
+                key: "mux0-right-click-paste",
+                defaultValue: true,
+                label: L10n.Settings.Terminal.rightClickPaste
+            )
+
             BoundSegmented(
                 settings: settings,
                 key: "confirm-close-surface",
-                options: ["true", "false", "always"],
+                // "false" leads — Reset Defaults and a fresh install both
+                // land on "close without confirming". The right-click → close
+                // path in TabContentView honors this same key.
+                options: ["false", "true", "always"],
                 label: L10n.Settings.Terminal.confirmClose
             )
 

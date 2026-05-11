@@ -400,10 +400,28 @@ final class TabContentView: NSView {
     // MARK: - Close confirmation
 
     private func confirmCloseTab(_ tabId: UUID) {
-        guard let window,
-              let wsId = store?.selectedId,
+        guard let wsId = store?.selectedId,
               let ws = store?.workspaces.first(where: { $0.id == wsId }),
               let tab = ws.tabs.first(where: { $0.id == tabId }) else { return }
+
+        // Honor `confirm-close-surface` from Settings → Terminal. Default is
+        // "false" (close instantly, no prompt). "true" / "always" both fall
+        // through to the sheet. Anything we don't recognize is treated as the
+        // default so the absence of the key behaves like "false".
+        let raw = settingsStore?.get("confirm-close-surface")?.lowercased() ?? "false"
+        if raw == "false" {
+            store?.removeTab(id: tabId, from: wsId)
+            reloadFromStore()
+            return
+        }
+
+        guard let window else {
+            // No host window — can't sheet. Default to closing instead of
+            // silently swallowing the action.
+            store?.removeTab(id: tabId, from: wsId)
+            reloadFromStore()
+            return
+        }
 
         let alert = NSAlert()
         alert.messageText = L10n.string("tab.close.alert.title")
@@ -426,6 +444,23 @@ final class TabContentView: NSView {
         // new tab, after which selectedTab?.focusedTerminalId would resolve to
         // the fresh terminal and inherit would self-copy a nil.
         let sourceId = ws.selectedTab?.focusedTerminalId
+        // If the user has any Quick Action enabled in Settings, the first one
+        // in `displayList` order (drag-reorderable) becomes the kind of tab
+        // "+" creates — Claude Code, Codex, etc. — so the top-right floating
+        // bar isn't needed and "+" is the single new-tab entry point.
+        if let actionId = quickActionsStore?.displayList.first {
+            let title = quickActionsStore?.displayName(for: actionId, locale: .current) ?? ""
+            guard let result = store?.addQuickActionTab(
+                id: actionId,
+                title: title,
+                in: wsId
+            ) else { return }
+            if let prev = result.sourcePwdTerminalId {
+                pwdStore?.inherit(from: prev, to: result.terminalId)
+            }
+            reloadFromStore()
+            return
+        }
         guard let result = store?.addTab(to: wsId) else { return }
         if let sourceId {
             pwdStore?.inherit(from: sourceId, to: result.terminalId)

@@ -13,6 +13,11 @@ final class GhosttyTerminalView: NSView, NSTextInputClient {
     /// 仅在 `keyDown(with:)` 调用栈内为 true。用于区分 "按键驱动" 与 "IME 面板主动提交" 两类
     /// `insertText`：前者经 ghostty_surface_key 统一走 text 字段，后者必须立即走 ghostty_surface_text。
     private var insideKeyDown: Bool = false
+    /// Set when `rightMouseDown` short-circuited into a paste and did NOT
+    /// forward a PRESS to ghostty. The matching `rightMouseUp` must then also
+    /// skip its RELEASE — sending an unmatched RELEASE would leave ghostty in
+    /// a "right button held" state for the next genuine right-click.
+    private var rightClickPastedThisCycle: Bool = false
     /// IME 正在组字时的 preedit 字符串。空字符串表示没有组字中的状态。
     private let markedTextStore = NSMutableAttributedString()
 
@@ -29,6 +34,14 @@ final class GhosttyTerminalView: NSView, NSTextInputClient {
     /// `unfocused-split-opacity` 驱动。ghostty 原生该配置只对其内建 split tree 生效,
     /// mux0 用独立 surface + NSSplitView 自绘，需要我们自己在 view 层 apply alpha。
     private static var unfocusedOpacity: CGFloat = 1.0
+
+    /// When true, a right-click on the terminal pastes the system clipboard
+    /// (going through ghostty's `paste_from_clipboard` binding so bracketed
+    /// paste / newline sanitization still apply). When the underlying app
+    /// captures the mouse (vim/htop/fzf), the right-click is forwarded to
+    /// ghostty as usual so the app can react. Settings → Terminal exposes
+    /// the master toggle; ContentView pushes the value via `setRightClickPaste`.
+    private static var rightClickPaste: Bool = true
 
     /// The model-layer UUID this view represents. Set by TabContentView right after
     /// construction. Used by GhosttyBridge.actionCallback to route ghostty action
@@ -181,6 +194,12 @@ final class GhosttyTerminalView: NSView, NSTextInputClient {
             }
         }
         applyUnfocusedOpacity()
+    }
+
+    /// Master switch for "right-click pastes clipboard". Idempotent; no
+    /// per-view repaint needed — the value is read inline by `rightMouseDown`.
+    static func setRightClickPaste(_ enabled: Bool) {
+        rightClickPaste = enabled
     }
 
     /// 设置非聚焦 pane 的不透明度。立即对现有 view 生效。
@@ -571,6 +590,16 @@ final class GhosttyTerminalView: NSView, NSTextInputClient {
     override func rightMouseDown(with event: NSEvent) {
         Self.releaseAllExcept(self)
         guard let s = surface else { return }
+        // When the running PTY app is in mouse-reporting mode (vim, htop, fzf,
+        // tmux mouse mode, etc.) the right-click belongs to it — pasting would
+        // be confusing and would steal an event the app expects. The check
+        // happens BEFORE the paste branch so mouse-aware TUIs keep working.
+        if Self.rightClickPaste && !ghostty_surface_mouse_captured(s) {
+            rightClickPastedThisCycle = true
+            _ = pasteClipboard()
+            return
+        }
+        rightClickPastedThisCycle = false
         let pt = flippedPoint(event.locationInWindow)
         ghostty_surface_mouse_pos(s, pt.x, pt.y, modsFromEvent(event))
         _ = ghostty_surface_mouse_button(
@@ -582,6 +611,10 @@ final class GhosttyTerminalView: NSView, NSTextInputClient {
     }
 
     override func rightMouseUp(with event: NSEvent) {
+        if rightClickPastedThisCycle {
+            rightClickPastedThisCycle = false
+            return
+        }
         guard let s = surface else { return }
         let pt = flippedPoint(event.locationInWindow)
         ghostty_surface_mouse_pos(s, pt.x, pt.y, modsFromEvent(event))

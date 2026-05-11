@@ -134,6 +134,41 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "终端" } }
       }
     },
+    "notifications.body.finished.failure %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Task failed · %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "任务失败 · %@" } }
+      }
+    },
+    "notifications.body.finished.success %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Task finished · %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "任务完成 · %@" } }
+      }
+    },
+    "notifications.release.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Click to view releases." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "点击查看 Releases 页面下载。" } }
+      }
+    },
+    "notifications.release.title %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Mux0 v%@ available" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Mux0 v%@ 可用" } }
+      }
+    },
+    "notifications.body.needsInput" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Needs your input" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要你输入" } }
+      }
+    },
     "quickActions.builtin.claude" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -354,8 +389,8 @@
     "settings.quickActions.headingFooter" : {
       "extractionState" : "manual",
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enabled buttons appear in the top-right corner of the window. Drag to reorder." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "启用的按钮会按下方顺序出现在窗口右上角，可拖拽排序。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The tab bar “+” button opens whichever enabled action is at the top of this list. Drag to reorder." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "标签栏的“+”按钮会打开此列表中位于最前的已启用项。可拖拽改变顺序。" } }
       }
     },
     "settings.reset.alertTitle" : {
@@ -440,6 +475,27 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "OpenCode" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "OpenCode" } }
+      }
+    },
+    "settings.agents.macNotificationsFooter" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show a macOS banner when an agent finishes a turn or asks for input. Per-agent toggles above still gate which events count." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Agent 完成一轮或需要确认时弹出 macOS 横幅。仍受上方每个 agent 的开关控制。" } }
+      }
+    },
+    "settings.agents.macNotificationsLabel" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show macOS notifications" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示 macOS 通知" } }
+      }
+    },
+    "settings.agents.macNotificationsTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "macOS Notifications" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系统通知" } }
       }
     },
     "settings.agents.notificationsTitle" : {
@@ -561,6 +617,13 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "键入时隐藏鼠标" } }
       }
     },
+    "settings.terminal.rightClickPaste" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Right-click pastes clipboard" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "右键直接粘贴" } }
+      }
+    },
     "settings.terminal.scrollbackLimit" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -643,6 +706,20 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete workspace?" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除 workspace？" } }
+      }
+    },
+    "sidebar.folderPicker.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pick a folder for the new workspace. The first terminal will cd into it and the workspace will adopt the folder name." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "为新 workspace 选一个文件夹。首个终端会自动 cd 进去，workspace 名也会取该文件夹名。" } }
+      }
+    },
+    "sidebar.folderPicker.prompt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose Folder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择文件夹" } }
       }
     },
     "sidebar.hide" : {

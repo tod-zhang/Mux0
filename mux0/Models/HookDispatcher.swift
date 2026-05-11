@@ -13,10 +13,22 @@ import Foundation
 /// the enum no longer has `.shell`, and the socket listener's JSONDecoder
 /// drops stray shell-agent payloads before they reach this function.
 enum HookDispatcher {
+    /// Lightweight event carrier consumed by the notifier. `NotificationManager`
+    /// currently only needs the event *kind* (it just plays a sound), but the
+    /// associated data is preserved so future code paths — e.g. routing the
+    /// click destination back to a specific tab — don't have to reshape the
+    /// dispatcher.
+    enum NotifyEvent {
+        case needsInput(terminalId: UUID, agent: HookMessage.Agent)
+        case finished(terminalId: UUID, agent: HookMessage.Agent,
+                      exitCode: Int32, duration: TimeInterval, summary: String?)
+    }
+
     static func dispatch(_ msg: HookMessage,
                          settings: SettingsConfigStore,
                          store: TerminalStatusStore,
-                         workspaceStore: WorkspaceStore? = nil) {
+                         workspaceStore: WorkspaceStore? = nil,
+                         notify: ((NotifyEvent) -> Void)? = nil) {
         // Resume is gated independently from the status (notifications)
         // toggle: a user who only wants auto-resume but doesn't want the
         // running/idle icons should still get their session id persisted.
@@ -53,15 +65,48 @@ enum HookDispatcher {
             // while the terminal is still running — otherwise the heartbeat
             // would overwrite a terminal success/failed one minute later.
             if case .running = store.status(for: msg.terminalId) {
+                let before = store.status(for: msg.terminalId)
                 store.setNeedsInput(terminalId: msg.terminalId, at: msg.timestamp)
+                // Only notify when the state actually flipped (a stale event
+                // suppressed by the store wouldn't change the public state and
+                // shouldn't ring the user).
+                if case .needsInput = store.status(for: msg.terminalId),
+                   case .running = before {
+                    notify?(.needsInput(terminalId: msg.terminalId, agent: msg.agent))
+                }
             }
         case .finished:
             // hook-emit.sh degrades malformed `finished` to `idle` before it
             // reaches us; this guard is defense in depth.
             guard let ec = msg.exitCode else { return }
+            let before = store.status(for: msg.terminalId)
             store.setFinished(terminalId: msg.terminalId, exitCode: ec,
                               at: msg.timestamp, agent: msg.agent,
                               summary: msg.summary)
+            // Notify only when the store actually accepted the event (stale
+            // timestamps are silently dropped by setFinished's isStale guard).
+            // Use the post-state's duration so the notification matches the
+            // tooltip the user will see in the sidebar.
+            let after = store.status(for: msg.terminalId)
+            switch (before, after) {
+            case (.success, .success), (.failed, .failed):
+                return
+            default: break
+            }
+            let duration: TimeInterval = {
+                switch after {
+                case .success(_, let d, _, _, _, _): return d
+                case .failed(_, let d, _, _, _, _):  return d
+                default: return 0
+                }
+            }()
+            if case .success = after {
+                notify?(.finished(terminalId: msg.terminalId, agent: msg.agent,
+                                  exitCode: ec, duration: duration, summary: msg.summary))
+            } else if case .failed = after {
+                notify?(.finished(terminalId: msg.terminalId, agent: msg.agent,
+                                  exitCode: ec, duration: duration, summary: msg.summary))
+            }
         }
     }
 }

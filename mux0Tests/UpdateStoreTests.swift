@@ -1,6 +1,7 @@
 import XCTest
 @testable import mux0
 
+@MainActor
 final class UpdateStoreTests: XCTestCase {
 
     func testDefaultStateIsIdle() {
