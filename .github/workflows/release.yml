@@ -49,7 +49,7 @@ jobs:
         run: ./scripts/sync-landing-version.sh --check
 
   build:
-    name: Build, notarize, release
+    name: Build unsigned DMG
     needs: check
     if: needs.check.outputs.should_release == 'true'
     # macos-26 ships Xcode 26 / macOS 26 SDK so SwiftUI controls render with
@@ -83,58 +83,16 @@ jobs:
         with:
           version: 0.15.2
 
-      - name: Guard against unfilled Sparkle public key placeholder
-        run: |
-          if grep -q "REPLACE_WITH_SPARKLE_ED_PUBKEY" project.yml; then
-            echo "::error::SUPublicEDKey is still a placeholder. Complete First Release Bootstrap (docs/build.md) before releasing."
-            exit 1
-          fi
-
-      - name: Import Developer ID certificate into temp keychain
-        env:
-          CERT_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_P12 }}
-          CERT_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
-        run: |
-          KEYCHAIN_PATH="$RUNNER_TEMP/build.keychain-db"
-          KEYCHAIN_PASSWORD=$(openssl rand -hex 32)
-          CERT_PATH="$RUNNER_TEMP/cert.p12"
-
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-
-          printf '%s' "$CERT_P12_BASE64" | base64 -d > "$CERT_PATH"
-
-          security import "$CERT_PATH" \
-            -k "$KEYCHAIN_PATH" \
-            -P "$CERT_PASSWORD" \
-            -T /usr/bin/codesign \
-            -T /usr/bin/security \
-            -T /usr/bin/productbuild
-
-          security set-key-partition-list \
-            -S "apple-tool:,apple:,codesign:" \
-            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
-
-          # Put our build keychain on the user search list so codesign can find the identity
-          EXISTING=$(security list-keychains -d user | sed -e 's/^[[:space:]]*"//' -e 's/"$//' | tr '\n' ' ')
-          security list-keychains -d user -s "$KEYCHAIN_PATH" $EXISTING
-
-          echo "Available signing identities:"
-          security find-identity -v -p codesigning "$KEYCHAIN_PATH"
-
-          rm -f "$CERT_PATH"
-
       - name: Build libghostty
         run: ./scripts/build-vendor.sh
 
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Build Release (universal) with Developer ID + Hardened Runtime
-        env:
-          SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Build Release (universal) ad-hoc signed
+        # No Apple Developer ID available on this fork — sign ad-hoc so the
+        # binary still launches locally. macOS Gatekeeper will warn first run;
+        # users must right-click → Open or run `xattr -dr com.apple.quarantine`.
         run: |
           xcodebuild \
             -project mux0.xcodeproj \
@@ -144,89 +102,14 @@ jobs:
             ONLY_ACTIVE_ARCH=NO \
             -derivedDataPath build \
             CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="$SIGN_IDENTITY" \
-            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_IDENTITY="-" \
+            DEVELOPMENT_TEAM="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=YES \
+            ENABLE_HARDENED_RUNTIME=NO \
+            OTHER_CODE_SIGN_FLAGS="" \
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-            OTHER_CODE_SIGN_FLAGS="--timestamp --options=runtime" \
             build
-
-      - name: Re-sign Sparkle nested binaries with Developer ID
-        # SPM + Manual code signing doesn't deep-sign bundles nested inside
-        # Sparkle.framework (Updater.app, Autoupdate, Downloader.xpc, Installer.xpc).
-        # They ship with Sparkle's upstream ad-hoc signature, which notarization rejects.
-        # Re-sign innermost → outermost with Developer ID + hardened runtime + timestamp.
-        env:
-          SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: |
-          APP="build/Build/Products/Release/mux0.app"
-          SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
-          # --preserve-metadata=entitlements keeps Sparkle's per-binary entitlements
-          # (e.g. Installer.xpc needs com.apple.security.cs.disable-library-validation).
-          FLAGS="--force --timestamp --options=runtime --preserve-metadata=entitlements --sign"
-
-          # Innermost executables
-          codesign $FLAGS "$SIGN_IDENTITY" "$SPARKLE/Versions/B/XPCServices/Downloader.xpc/Contents/MacOS/Downloader"
-          codesign $FLAGS "$SIGN_IDENTITY" "$SPARKLE/Versions/B/XPCServices/Installer.xpc/Contents/MacOS/Installer"
-          codesign $FLAGS "$SIGN_IDENTITY" "$SPARKLE/Versions/B/Updater.app/Contents/MacOS/Updater"
-          codesign $FLAGS "$SIGN_IDENTITY" "$SPARKLE/Versions/B/Autoupdate"
-
-          # Enclosing bundles
-          codesign $FLAGS "$SIGN_IDENTITY" "$SPARKLE/Versions/B/XPCServices/Downloader.xpc"
-          codesign $FLAGS "$SIGN_IDENTITY" "$SPARKLE/Versions/B/XPCServices/Installer.xpc"
-          codesign $FLAGS "$SIGN_IDENTITY" "$SPARKLE/Versions/B/Updater.app"
-
-          # Framework itself
-          codesign $FLAGS "$SIGN_IDENTITY" "$SPARKLE"
-
-          # Re-sign the outer app last so its seal covers the re-signed framework
-          codesign $FLAGS "$SIGN_IDENTITY" "$APP"
-
-      - name: Verify signature
-        run: |
-          APP="build/Build/Products/Release/mux0.app"
-          codesign --verify --deep --strict --verbose=2 "$APP"
-          codesign -dv --verbose=4 "$APP" 2>&1 | grep -E "Authority|TeamIdentifier|Runtime|Signature"
-
-      - name: Notarize .app
-        env:
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
-          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
-        run: |
-          APP="build/Build/Products/Release/mux0.app"
-          KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
-          ZIP="$RUNNER_TEMP/mux0-notarize.zip"
-
-          printf '%s' "$APPLE_API_KEY_P8" > "$KEY_PATH"
-          chmod 600 "$KEY_PATH"
-
-          # notarytool accepts .zip / .dmg / .pkg — ship a zip for the .app
-          ditto -c -k --keepParent "$APP" "$ZIP"
-
-          SUBMIT_JSON=$(xcrun notarytool submit "$ZIP" \
-            --key "$KEY_PATH" \
-            --key-id "$APPLE_API_KEY_ID" \
-            --issuer "$APPLE_API_ISSUER_ID" \
-            --wait \
-            --timeout 30m \
-            --output-format json)
-          echo "$SUBMIT_JSON"
-          SUBMISSION_ID=$(echo "$SUBMIT_JSON" | jq -r .id)
-          STATUS=$(echo "$SUBMIT_JSON" | jq -r .status)
-          if [ "$STATUS" != "Accepted" ]; then
-            echo "::error::App notarization status=$STATUS (id=$SUBMISSION_ID). Fetching log..."
-            xcrun notarytool log "$SUBMISSION_ID" \
-              --key "$KEY_PATH" \
-              --key-id "$APPLE_API_KEY_ID" \
-              --issuer "$APPLE_API_ISSUER_ID" || true
-            rm -f "$KEY_PATH" "$ZIP"
-            exit 1
-          fi
-
-          xcrun stapler staple "$APP"
-          xcrun stapler validate "$APP"
-
-          rm -f "$KEY_PATH" "$ZIP"
 
       - name: Generate changelog
         # `--latest` reads the most recent existing tag, but the new release
@@ -248,85 +131,6 @@ jobs:
             "build/Build/Products/Release/mux0.app"
           echo "path=$DMG" >> "$GITHUB_OUTPUT"
 
-      - name: Sign and notarize DMG
-        env:
-          SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
-          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
-        run: |
-          DMG="${{ steps.dmg.outputs.path }}"
-          KEY_PATH="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
-
-          printf '%s' "$APPLE_API_KEY_P8" > "$KEY_PATH"
-          chmod 600 "$KEY_PATH"
-
-          # Sign the DMG itself (notarization requires Developer ID signature)
-          codesign --force --sign "$SIGN_IDENTITY" --timestamp "$DMG"
-
-          SUBMIT_JSON=$(xcrun notarytool submit "$DMG" \
-            --key "$KEY_PATH" \
-            --key-id "$APPLE_API_KEY_ID" \
-            --issuer "$APPLE_API_ISSUER_ID" \
-            --wait \
-            --timeout 30m \
-            --output-format json)
-          echo "$SUBMIT_JSON"
-          SUBMISSION_ID=$(echo "$SUBMIT_JSON" | jq -r .id)
-          STATUS=$(echo "$SUBMIT_JSON" | jq -r .status)
-          if [ "$STATUS" != "Accepted" ]; then
-            echo "::error::DMG notarization status=$STATUS (id=$SUBMISSION_ID). Fetching log..."
-            xcrun notarytool log "$SUBMISSION_ID" \
-              --key "$KEY_PATH" \
-              --key-id "$APPLE_API_KEY_ID" \
-              --issuer "$APPLE_API_ISSUER_ID" || true
-            rm -f "$KEY_PATH"
-            exit 1
-          fi
-
-          xcrun stapler staple "$DMG"
-          xcrun stapler validate "$DMG"
-
-          rm -f "$KEY_PATH"
-
-      - name: Sign DMG with Sparkle EdDSA
-        id: sign
-        env:
-          ED_PRIV: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
-        run: |
-          PRIV_PATH=$(mktemp)
-          printf '%s' "$ED_PRIV" > "$PRIV_PATH"
-          SIGN=$(find build/SourcePackages/artifacts/sparkle -name sign_update | head -1)
-          if [ -z "$SIGN" ]; then
-            echo "sign_update not found in SPM artifacts, falling back to prebuilt"
-            curl -L -o /tmp/sign_update https://github.com/sparkle-project/Sparkle/releases/download/2.9.1/sign_update
-            chmod +x /tmp/sign_update
-            SIGN=/tmp/sign_update
-          fi
-          # sign_update 输出形如：sparkle:edSignature="<base64>" length="<bytes>"
-          # 必须提取引号内的纯 base64；早先用 awk '{print $1}' 会把
-          # `sparkle:edSignature="<base64>"` 整段塞进 appcast，导致 Sparkle
-          # 校验失败弹「此更新未正确签名」。
-          SIGN_OUTPUT=$("$SIGN" -f "$PRIV_PATH" "${{ steps.dmg.outputs.path }}")
-          SIGNATURE=$(printf '%s' "$SIGN_OUTPUT" | sed -E 's/.*edSignature="([^"]+)".*/\1/')
-          if [ -z "$SIGNATURE" ] || [ "$SIGNATURE" = "$SIGN_OUTPUT" ]; then
-            echo "::error::Failed to parse EdDSA signature from sign_update output: $SIGN_OUTPUT"
-            rm -f "$PRIV_PATH"
-            exit 1
-          fi
-          rm -f "$PRIV_PATH"
-          echo "signature=$SIGNATURE" >> "$GITHUB_OUTPUT"
-
-      - name: Render appcast.xml
-        run: |
-          .github/scripts/render-appcast.sh \
-            "$VERSION" \
-            "$BUILD_NUMBER" \
-            "${{ steps.dmg.outputs.path }}" \
-            "${{ steps.sign.outputs.signature }}" \
-            CHANGELOG.md \
-            > appcast.xml
-
       - name: Create and push git tag
         run: |
           git config user.name "github-actions[bot]"
@@ -340,11 +144,5 @@ jobs:
         run: |
           gh release create "$TAG" \
             "${{ steps.dmg.outputs.path }}" \
-            appcast.xml \
             --title "$TAG" \
             --notes-file CHANGELOG.md
-
-      - name: Clean up keychain
-        if: always()
-        run: |
-          security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
