@@ -29,6 +29,20 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "拷贝" } }
       }
     },
+    "menu.cycleAttentionTab" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cycle Attention Tabs" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "切换到下一个需关注的 Tab" } }
+      }
+    },
+    "menu.cycleAttentionTabReverse" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cycle Attention Tabs (Reverse)" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "切换到上一个需关注的 Tab" } }
+      }
+    },
     "menu.editConfig" : {
       "extractionState" : "manual",
       "localizations" : {

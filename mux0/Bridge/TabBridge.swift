@@ -24,6 +24,7 @@ struct TabBridge: NSViewRepresentable {
         let view = TabContentView(frame: .zero)
         view.store = store
         view.pwdStore = pwdStore
+        view.statusStore = statusStore
         view.settingsStore = settings
         view.quickActionsStore = quickActionsStore
         view.applyTheme(theme, backgroundOpacity: backgroundOpacity, locale: locale)
@@ -39,6 +40,7 @@ struct TabBridge: NSViewRepresentable {
         _ = languageTick
         nsView.store = store
         nsView.pwdStore = pwdStore
+        nsView.statusStore = statusStore
         nsView.settingsStore = settings
         nsView.quickActionsStore = quickActionsStore
         nsView.applyTheme(theme, backgroundOpacity: backgroundOpacity, locale: locale)

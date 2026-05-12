@@ -242,6 +242,8 @@ enum L10n {
         static let focusPrevPane        = LocalizedStringResource("menu.focusPrevPane")
         static let selectNextTab        = LocalizedStringResource("menu.selectNextTab")
         static let selectPrevTab        = LocalizedStringResource("menu.selectPrevTab")
+        static let cycleAttentionTab        = LocalizedStringResource("menu.cycleAttentionTab")
+        static let cycleAttentionTabReverse = LocalizedStringResource("menu.cycleAttentionTabReverse")
         static let terminalMenu         = LocalizedStringResource("menu.terminal")
         static let copy                 = LocalizedStringResource("menu.copy")
         static let paste                = LocalizedStringResource("menu.paste")

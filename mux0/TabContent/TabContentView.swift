@@ -22,6 +22,7 @@ import AppKit
 final class TabContentView: NSView {
     var store: WorkspaceStore?
     var pwdStore: TerminalPwdStore?
+    var statusStore: TerminalStatusStore?
     /// Used only by `terminalViewFor` to gate consumption of pending agent
     /// resume commands against the user's Settings → Agents → Resume toggle.
     var settingsStore: SettingsConfigStore?
@@ -371,6 +372,7 @@ final class TabContentView: NSView {
             .mux0SplitVertical, .mux0SplitHorizontal,
             .mux0SelectNextTab, .mux0SelectPrevTab,
             .mux0SelectTabAtIndex,
+            .mux0CycleAttentionTab, .mux0CycleAttentionTabReverse,
             .mux0FocusNextPane, .mux0FocusPrevPane,
         ]
         for name in names {
@@ -391,6 +393,8 @@ final class TabContentView: NSView {
         case .mux0SelectPrevTab:    cycleTab(forward: false)
         case .mux0SelectTabAtIndex:
             if let idx = note.userInfo?["index"] as? Int { selectTab(at: idx) }
+        case .mux0CycleAttentionTab:        cycleAttentionTab(forward: true)
+        case .mux0CycleAttentionTabReverse: cycleAttentionTab(forward: false)
         case .mux0FocusNextPane:    focusAdjacentPane(forward: true)
         case .mux0FocusPrevPane:    focusAdjacentPane(forward: false)
         default: break
@@ -503,6 +507,49 @@ final class TabContentView: NSView {
               let wsId = store?.selectedId,
               index < ws.tabs.count else { return }
         store?.selectTab(id: ws.tabs[index].id, in: wsId)
+        reloadFromStore()
+    }
+
+    /// Jump to the next "needs attention" tab across all workspaces.
+    /// Tier 1 (needsInput, unread success/failed) is exhausted before tier 2
+    /// (running). Within a tier, order follows workspace list then tab list.
+    /// Repeated presses cycle the full list; reverse walks the same order backwards.
+    private func cycleAttentionTab(forward: Bool) {
+        guard let store, let statusStore else { return }
+        var tier1: [(wsId: UUID, tabId: UUID)] = []
+        var tier2: [(wsId: UUID, tabId: UUID)] = []
+        for ws in store.workspaces {
+            for tab in ws.tabs {
+                let agg = statusStore.aggregateStatus(terminalIds: tab.layout.allTerminalIds())
+                switch agg {
+                case .needsInput:
+                    tier1.append((ws.id, tab.id))
+                case .success(_, _, _, _, _, let readAt) where readAt == nil:
+                    tier1.append((ws.id, tab.id))
+                case .failed(_, _, _, _, _, let readAt) where readAt == nil:
+                    tier1.append((ws.id, tab.id))
+                case .running:
+                    tier2.append((ws.id, tab.id))
+                default:
+                    break
+                }
+            }
+        }
+        let list = tier1 + tier2
+        guard !list.isEmpty else { NSSound.beep(); return }
+        let currentTabId = store.selectedWorkspace?.selectedTabId
+        let currentIdx = list.firstIndex { $0.wsId == store.selectedId && $0.tabId == currentTabId }
+        let nextIdx: Int
+        if let cur = currentIdx {
+            nextIdx = forward ? (cur + 1) % list.count : (cur - 1 + list.count) % list.count
+        } else {
+            nextIdx = forward ? 0 : list.count - 1
+        }
+        let target = list[nextIdx]
+        if target.wsId != store.selectedId {
+            store.select(id: target.wsId)
+        }
+        store.selectTab(id: target.tabId, in: target.wsId)
         reloadFromStore()
     }
 

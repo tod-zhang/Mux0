@@ -143,6 +143,12 @@ struct mux0App: App {
             Button(String(localized: L10n.Menu.selectPrevTab.withLocale(LanguageStore.shared.locale))) { post(.mux0SelectPrevTab) }
                 .keyboardShortcut("[", modifiers: [.command, .shift])
 
+            Button(String(localized: L10n.Menu.cycleAttentionTab.withLocale(LanguageStore.shared.locale))) { post(.mux0CycleAttentionTab) }
+                .keyboardShortcut(.tab, modifiers: .control)
+
+            Button(String(localized: L10n.Menu.cycleAttentionTabReverse.withLocale(LanguageStore.shared.locale))) { post(.mux0CycleAttentionTabReverse) }
+                .keyboardShortcut(.tab, modifiers: [.control, .shift])
+
             Divider()
 
             ForEach(1...9, id: \.self) { idx in
